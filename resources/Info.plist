@@ -1,0 +1,39 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+    <key>CFBundleName</key>
+    <string>DocumentManager</string>
+    <key>CFBundleDisplayName</key>
+    <string>Document Manager</string>
+    <key>CFBundleIdentifier</key>
+    <string>com.servitec.documentmanager</string>
+    <key>CFBundleVersion</key>
+    <string>1.0.0</string>
+    <key>CFBundleShortVersionString</key>
+    <string>1.0.0</string>
+    <key>CFBundleExecutable</key>
+    <string>DocumentManager</string>
+    <key>CFBundleIconFile</key>
+    <string>icon.icns</string>
+    <key>LSApplicationCategoryType</key>
+    <string>public.app-category.productivity</string>
+    <key>NSHighResolutionCapable</key>
+    <true/>
+    <key>LSMinimumSystemVersion</key>
+    <string>10.10</string>
+    <key>NSRequiresAquaSystemAppearance</key>
+    <false/>
+    <!-- File access permissions -->
+    <key>NSAppleEventsUsageDescription</key>
+    <string>This app needs to control other applications to open files.</string>
+    <key>NSDesktopFolderUsageDescription</key>
+    <string>This app needs access to your Desktop folder to select files.</string>
+    <key>NSDocumentsFolderUsageDescription</key>
+    <string>This app needs access to your Documents folder to select files.</string>
+    <key>NSDownloadsFolderUsageDescription</key>
+    <string>This app needs access to your Downloads folder to select files.</string>
+    <key>NSFileProviderPresenceUsageDescription</key>
+    <string>This app needs to access files to manage documents.</string>
+</dict>
+</plist>
