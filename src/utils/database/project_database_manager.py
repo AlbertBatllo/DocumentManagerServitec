@@ -242,11 +242,23 @@ class ProjectDatabaseManager:
 
             # Future migrations can be added here
             conn.commit()
-            
+
         except sqlite3.Error as e:
             print(f"Migration error: {e}")
             # Don't fail initialization for migration errors
             pass
+
+        # Refactor Fase 1: nuevo modelo de datos (proyectos / planos /
+        # archivos / plano_estado_historial). Idempotente: si ya esta
+        # aplicada, es un no-op rapido. Se ejecuta fuera del try anterior
+        # porque sus errores SI deben propagarse (no queremos arrancar la
+        # app con el modelo nuevo a medio aplicar).
+        from utils.database.migrations import apply_refactor_fase1
+        result = apply_refactor_fase1(conn, self.project_path)
+        if result is not None:
+            print(f"✅ Refactor fase 1 aplicada: {result['counts']}")
+            if result.get('backup_path'):
+                print(f"   Backup en: {result['backup_path']}")
 
     def migrate_from_json(self) -> bool:
         """
