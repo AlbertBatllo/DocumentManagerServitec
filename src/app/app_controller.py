@@ -404,7 +404,51 @@ class AppController:
             self._project_selection_view = ProjectSelectionView(self.root)
 
         user_name = self.get_current_user()
-        self._project_selection_view.show(self.on_project_selected, user_name, None)
+        self._project_selection_view.show(
+            self.on_project_selected,
+            user_name,
+            None,
+            on_create_project=self.show_project_creation,
+        )
+
+    def show_project_creation(self):
+        """Show the create-project form."""
+        from views.project_form_view import ProjectFormView
+        form_view = ProjectFormView(self.root)
+        form_view.show_create(
+            on_submit=self._handle_project_created,
+            on_cancel=self.show_project_selection,
+        )
+
+    def _handle_project_created(self, form_data: dict) -> None:
+        """Run project creation service and return to the project list."""
+        from services.project_creation_service import (
+            crear_proyecto,
+            ProjectAlreadyExistsError,
+            ProjectCreationError,
+        )
+        try:
+            folder = crear_proyecto(
+                tipo=form_data["tipo"],
+                nombre=form_data["nombre"],
+                codigo=form_data["codigo"],
+                lugar=form_data.get("lugar"),
+                descripcion=form_data.get("descripcion"),
+                obligatorios=form_data.get("obligatorios", []),
+                detalles=form_data.get("detalles", []),
+            )
+        except ProjectAlreadyExistsError as e:
+            messagebox.showerror("Codigo en uso", str(e))
+            return
+        except ProjectCreationError as e:
+            messagebox.showerror("Error al crear proyecto", str(e))
+            return
+
+        messagebox.showinfo(
+            "Proyecto creado",
+            f"Proyecto creado correctamente:\n{folder}"
+        )
+        self.show_project_selection()
 
     def on_project_selected(self, project_name: str, project_path: str):
         """Handle project selection."""

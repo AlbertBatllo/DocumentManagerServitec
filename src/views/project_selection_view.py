@@ -1,17 +1,19 @@
 import tkinter as tk
 from tkinter import ttk
-from typing import Callable, List
+from typing import Callable, List, Optional
 from pathlib import Path
 from .base_view import BaseView
 from utils.folder_resolver import FolderResolver
+from utils.app_paths import get_projects_root
 
 
 class ProjectSelectionView(BaseView):
     def __init__(self, root: tk.Tk):
         super().__init__(root)
-        
-    def show(self, callback: Callable[[str, str], None], user_name: str = "", 
-             notification_callbacks: dict = None) -> None:
+
+    def show(self, callback: Callable[[str, str], None], user_name: str = "",
+             notification_callbacks: dict = None,
+             on_create_project: Optional[Callable[[], None]] = None) -> None:
         """Show the project selection screen."""
         self.clear_window()
         self.center_window(750, 650)
@@ -28,11 +30,21 @@ class ProjectSelectionView(BaseView):
         
         # Header
         self.create_header(self.root, "Seleccionar Proyecto")
-        
+
+        # Barra superior con CTA de creacion a la derecha
+        topbar = ttk.Frame(self.root, padding=(20, 0, 20, 0))
+        topbar.pack(fill="x")
+        if on_create_project is not None:
+            self.create_visible_button(
+                topbar,
+                text="+ Crear proyecto nuevo",
+                command=on_create_project,
+            ).pack(side="right")
+
         # Main frame
         main_frame = ttk.Frame(self.root, padding="40")
         main_frame.pack(fill="both", expand=True)
-        
+
         # Instructions
         ttk.Label(
             main_frame,
@@ -53,21 +65,8 @@ class ProjectSelectionView(BaseView):
             ).pack(pady=20)
             
             # Get the correct app directory for instructions
-            import sys
-            if getattr(sys, 'frozen', False):
-                if sys.platform == "darwin":
-                    app_dir = Path(sys.executable).parent.parent.parent.parent
-                elif sys.platform == "win32":
-                    exe_dir = Path(sys.executable).parent
-                    if any(exe_dir.iterdir()) and not any(p.name.startswith("PRJ") and p.is_dir() for p in exe_dir.iterdir()):
-                        app_dir = exe_dir.parent
-                    else:
-                        app_dir = exe_dir
-                else:
-                    app_dir = Path(sys.executable).parent
-            else:
-                app_dir = Path.cwd()
-                
+            app_dir = get_projects_root()
+
             instructions = (
                 "Para usar el gestor de documentos:\n\n"
                 "1. Crea carpetas con formato 'PRJ-XXX' en:\n"
@@ -97,7 +96,9 @@ class ProjectSelectionView(BaseView):
             self.create_visible_button(
                 main_frame,
                 text="Buscar Proyectos",
-                command=lambda: self.show(callback)
+                command=lambda: self.show(callback, user_name,
+                                          notification_callbacks,
+                                          on_create_project)
             ).pack(pady=20)
             
         else:
@@ -145,29 +146,9 @@ class ProjectSelectionView(BaseView):
     def get_available_projects(self) -> List[tuple]:
         """Get available projects by scanning for PRJ-* folders."""
         projects = []
-        
-        # Get the directory where the app is located, not where it was launched from
-        import sys
-        if getattr(sys, 'frozen', False):
-            # Running as PyInstaller bundle
-            if sys.platform == "darwin":
-                app_dir = Path(sys.executable).parent.parent.parent.parent
-            elif sys.platform == "win32":
-                exe_dir = Path(sys.executable).parent
-                # For --onedir builds, the exe is inside a subfolder (e.g. DocumentManager/)
-                # Check if PRJ-* folders exist in exe_dir; if not, try the parent directory
-                if any(exe_dir.iterdir()) and not any(p.name.startswith("PRJ") and p.is_dir() for p in exe_dir.iterdir()):
-                    app_dir = exe_dir.parent
-                else:
-                    app_dir = exe_dir
-            else:
-                app_dir = Path(sys.executable).parent
-        else:
-            # Running as script (development)
-            app_dir = Path.cwd()
 
-        current_dir = app_dir
-        
+        current_dir = get_projects_root()
+
         # Look for PRJ-* folders in app directory
         for item in current_dir.iterdir():
             if item.is_dir() and item.name.startswith("PRJ"):
