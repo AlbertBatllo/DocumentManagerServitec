@@ -152,14 +152,22 @@ class ProjectSelectionView(BaseView):
         # Look for PRJ-* folders in app directory
         for item in current_dir.iterdir():
             if item.is_dir() and item.name.startswith("PRJ"):
-                # Check if it has the required subdirectories (new structure)
+                # Marker canonico post-Fase 1: la carpeta `.project_manager/`
+                # contiene la BD del proyecto. Si existe, es un proyecto valido
+                # aunque no tenga las subcarpetas legacy.
+                if (item / ".project_manager").is_dir():
+                    projects.append((item.name, str(item)))
+                    continue
+
+                # Compatibilidad con proyectos legacy: aceptar si existe alguna
+                # de las subcarpetas conocidas (planos/presupuestos/certificaciones)
+                # o si la carpeta esta totalmente vacia (lista para configurar).
                 planos_dir = FolderResolver.resolve_planos(item)
                 licitaciones_dir = FolderResolver.resolve_presupuestos(item)
                 certificaciones_dir = FolderResolver.resolve_certificaciones(item)
 
-                # Accept project if it has required subdirs OR if it's a fresh PRJ folder (to allow setup)
                 if (planos_dir.exists() or licitaciones_dir.exists() or certificaciones_dir.exists() or
-                    (len(list(item.iterdir())) == 0)):  # Empty PRJ folder is valid for new projects
+                    (len(list(item.iterdir())) == 0)):
                     projects.append((item.name, str(item)))
         
         # Sort projects by name

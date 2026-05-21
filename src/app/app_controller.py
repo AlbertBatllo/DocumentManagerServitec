@@ -420,6 +420,121 @@ class AppController:
             on_cancel=self.show_project_selection,
         )
 
+    # === Navigation: Project Edition (Fase 3) ===
+
+    def show_project_edit(self):
+        """Show the edit-project form pre-filled with the current project."""
+        if not self.current_project_path:
+            messagebox.showerror(
+                "Sin proyecto",
+                "No hay ningun proyecto seleccionado para editar.",
+            )
+            return
+
+        from services.project_edit_service import (
+            load_project_for_edit, ProjectEditError,
+        )
+
+        try:
+            project_data = load_project_for_edit(Path(self.current_project_path))
+        except ProjectEditError as e:
+            messagebox.showerror("Error al cargar proyecto", str(e))
+            return
+        except Exception as e:  # safety net
+            messagebox.showerror(
+                "Error al cargar proyecto",
+                f"No se pudo cargar el proyecto: {e}",
+            )
+            return
+
+        from views.project_form_view import ProjectFormView
+        form_view = ProjectFormView(self.root)
+        form_view.show_edit(
+            project_data=project_data,
+            on_submit=self._handle_project_edited,
+            on_cancel=self._back_to_planos_dashboard,
+            on_delete_check=self._delete_plano_check,
+        )
+
+    def _delete_plano_check(
+        self,
+        plano_id: int,
+        plano_nombre: str,
+        _n_archivos_hint: int,
+    ) -> str:
+        """
+        Llamado por el formulario cuando el usuario pulsa X en una fila
+        de plano existente. Consulta el servicio y muestra el dialogo
+        apropiado.
+        """
+        from services.project_edit_service import check_delete_safety
+        from views.plano_delete_dialog import ask_delete_action
+
+        try:
+            severity = check_delete_safety(
+                Path(self.current_project_path), plano_id
+            )
+        except Exception as e:
+            messagebox.showerror(
+                "Error",
+                f"No se pudo comprobar el estado del plano: {e}",
+            )
+            return "cancel"
+
+        # Para mostrar un mensaje mas claro, contar archivos cuando
+        # hace falta. Lo hacemos aqui para no acoplar el servicio al view.
+        n_archivos = 0
+        if severity in ("no_history", "has_history"):
+            try:
+                from utils.database.project_database_manager import (
+                    ensure_project_database,
+                )
+                db = ensure_project_database(Path(self.current_project_path))
+                with db.connection() as conn:
+                    row = conn.execute(
+                        "SELECT COUNT(*) AS c FROM archivos WHERE plano_id = ?",
+                        (plano_id,),
+                    ).fetchone()
+                    n_archivos = row["c"] if row else 0
+            except Exception:
+                n_archivos = 0
+
+        return ask_delete_action(
+            self.root, plano_nombre, severity, n_archivos=n_archivos
+        )
+
+    def _handle_project_edited(self, form_data: dict) -> None:
+        """Ejecuta el batch de edicion via el servicio y vuelve al dashboard."""
+        from services.project_edit_service import (
+            editar_proyecto, ProjectEditError,
+        )
+        try:
+            editar_proyecto(Path(self.current_project_path), form_data)
+        except ProjectEditError as e:
+            messagebox.showerror("Error al guardar proyecto", str(e))
+            return
+        except Exception as e:  # safety net
+            messagebox.showerror(
+                "Error al guardar proyecto",
+                f"No se pudo guardar el proyecto: {e}",
+            )
+            return
+
+        messagebox.showinfo("Guardado", "Cambios guardados correctamente.")
+        self._back_to_planos_dashboard()
+
+    def _back_to_planos_dashboard(self) -> None:
+        """Vuelve al dashboard de planos del proyecto actual."""
+        # Recarga el handler de planos y muestra el dashboard si esta
+        # disponible. Si no, cae al menu principal.
+        try:
+            if self._current_handler and hasattr(self._current_handler, 'show_dashboard'):
+                self._current_handler.show_dashboard()
+                return
+        except Exception:
+            pass
+        self.show_main_menu()
+
     def _handle_project_created(self, form_data: dict) -> None:
         """Run project creation service and return to the project list."""
         from services.project_creation_service import (

@@ -213,15 +213,30 @@ class PlanosDashboard(ResponsiveBaseView):
         # Legend panel (right side) - collapsible with dropdown button
         legend_container = ttk.Frame(top_frame)
         legend_container.grid(row=0, column=1, sticky="e", padx=10)
-        
+
+        # Top-right actions: Editar + Leyenda en la misma fila.
+        # 'edit_project' lo inyecta el handler (PlanosHandler) y apunta a
+        # AppController.show_project_edit.
+        actions_frame = ttk.Frame(legend_container)
+        actions_frame.pack(anchor="e")
+
+        edit_callback = (self.callbacks or {}).get('edit_project')
+        if edit_callback:
+            self.edit_button = ttk.Button(
+                actions_frame,
+                text="✎ Editar",
+                command=edit_callback,
+            )
+            self.edit_button.pack(side="left", padx=(0, 6))
+
         # Legend toggle button
         self.legend_visible = False
         self.legend_button = ttk.Button(
-            legend_container, 
-            text="▼ Leyenda de Estados", 
+            actions_frame,
+            text="▼ Leyenda de Estados",
             command=self._toggle_legend
         )
-        self.legend_button.pack(anchor="e")
+        self.legend_button.pack(side="left")
         
         # Legend frame (initially hidden)
         self.legend_frame = ttk.Frame(legend_container)

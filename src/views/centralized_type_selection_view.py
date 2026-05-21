@@ -73,10 +73,17 @@ class CentralizedTypeSelectionView(BaseView):
         planos_path = FolderResolver.resolve_planos(self.project_path)
         licitacion_path = FolderResolver.resolve_presupuestos(self.project_path)
         cert_path = FolderResolver.resolve_certificaciones(self.project_path)
-        
-        planos_exists = planos_path.exists()
-        licitacion_exists = licitacion_path.exists()
-        cert_exists = cert_path.exists()
+
+        # Marker post-Fase 1: la BD del proyecto (en .project_manager/)
+        # es la fuente de verdad de las metadatas. Las subcarpetas fisicas
+        # son opcionales y se crearan en la primera subida (Fase 6+).
+        # Para proyectos legacy sin .project_manager/ se mantiene la
+        # comprobacion historica de existencia de subcarpetas.
+        post_fase1 = (self.project_path / ".project_manager").is_dir()
+
+        planos_exists = post_fase1 or planos_path.exists()
+        licitacion_exists = post_fase1 or licitacion_path.exists()
+        cert_exists = post_fase1 or cert_path.exists()
         
         if not planos_exists and not licitacion_exists and not cert_exists:
             # No document folders found - show creation instructions

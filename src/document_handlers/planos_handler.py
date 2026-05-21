@@ -269,6 +269,10 @@ class PlanosHandler(BaseDocumentHandler):
         callbacks['annotate_document'] = self.annotate_selected_document
         callbacks['export_multiple'] = self.show_export_dialog
 
+        # Edicion de proyecto (Fase 3): boton "✎ Editar" en el dashboard.
+        if hasattr(self.app, 'show_project_edit'):
+            callbacks['edit_project'] = self.app.show_project_edit
+
         return callbacks
 
     def show_history_window(self, doc_name: str = None):
