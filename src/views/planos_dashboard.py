@@ -58,12 +58,14 @@ class PlanosDashboard(ResponsiveBaseView):
         self.user_name = user_name  # Stored for use during operations like bulk upload
         
         # Window controls toolbar removed - no maximize buttons needed
-        
+
         # Header
         self.create_header(self.root, "Gestión de Planos")
 
-        # Reserve bottom button frame BEFORE main content so it always gets space
-        bottom_actions_frame = self.create_bottom_button_frame(self.root)
+        # Reserve bottom button frame BEFORE main content so it always gets space.
+        # show_help=False: el texto "💡 Usa las barras..." se elimina (Fase 4);
+        # ensure_buttons_visible() ya garantiza la responsividad sin recordatorio.
+        bottom_actions_frame = self.create_bottom_button_frame(self.root, show_help=False)
 
         # Status bar (also at bottom, above buttons)
         self.status_label = ttk.Label(
@@ -78,33 +80,24 @@ class PlanosDashboard(ResponsiveBaseView):
         main_frame = ttk.Frame(self.root, padding="6")
         main_frame.pack(fill="both", expand=True)
 
-        # Centered Planos title - more prominent
-        title_frame = ttk.Frame(main_frame)
-        title_frame.pack(fill="x", pady=(0, 15))
+        # Layout Fase 4: barra superior (Filtratge + PLANOS + Editar/Leyenda),
+        # panel de filtros colapsable, indicador de refresh, tabla central.
+        self._create_top_bar(main_frame)
+        self._create_filter_panel(main_frame)
 
-        title_label = ttk.Label(
-            title_frame,
-            text="PLANOS",
-            font=("Arial", 28, "bold"),
-            foreground="#2E5984"  # Professional blue color
-        )
-        title_label.pack()
+        # Add refresh indicator (justo por encima de la tabla)
+        refresh_frame = ttk.Frame(main_frame)
+        refresh_frame.pack(fill="x", pady=(0, 2))
+        self.refresh_indicator = RefreshIndicator(refresh_frame)
+        self.refresh_indicator.set_manual_refresh_callback(self._manual_refresh)
 
-        # Subtitle with project info
-        subtitle_label = ttk.Label(
-            title_frame,
-            text="Planos - Ver Estado de Archivos",
-            font=("Arial", 14),
-            foreground="#666666"
-        )
-        subtitle_label.pack(pady=(5, 0))
-
-        # Create dashboard sections
-        self._create_filters_and_legend(main_frame)
+        # Tabla central (debe ser el ultimo pack para que expand=True se la
+        # quede todo el espacio vertical restante).
         self._create_document_list(main_frame, callbacks)
+
         # Place action buttons in the bottom-fixed container so they are always visible
         self._create_action_buttons(bottom_actions_frame, callbacks)
-        
+
         # Set up notification widget if available
         if user_name and 'get_notification_data' in callbacks:
             self.setup_notification_widget(
@@ -114,12 +107,6 @@ class PlanosDashboard(ResponsiveBaseView):
                 current_user=user_name,
                 delete_callback=callbacks.get('delete_notification')
             )
-        
-        # Add refresh indicator
-        refresh_frame = ttk.Frame(main_frame)
-        refresh_frame.pack(fill="x", pady=(0, 5))
-        self.refresh_indicator = RefreshIndicator(refresh_frame)
-        self.refresh_indicator.set_manual_refresh_callback(self._manual_refresh)
         
         # Store callbacks for smart refresh
         self.callbacks = callbacks
@@ -134,26 +121,96 @@ class PlanosDashboard(ResponsiveBaseView):
         # Initialize smart refresh
         self._setup_smart_refresh(callbacks)
 
-    def _create_filters_and_legend(self, parent: tk.Widget) -> None:
-        """Create filter controls and color legend like original status viewer"""
-        # Top frame for filters and legend (using grid layout)
-        top_frame = ttk.Frame(parent)
-        top_frame.pack(fill="x", pady=(0, 10))
-        top_frame.columnconfigure(0, weight=1)  # Filter frame expands
-        top_frame.columnconfigure(1, weight=0)  # Legend frame stays fixed
-        
-        # Filter frame (left side) - stack vertically
-        filter_frame = ttk.Frame(top_frame)
-        filter_frame.grid(row=0, column=0, sticky="ew", padx=(0, 10))
-        
-        # Search by ID (row 0)
+    # ==================================================================
+    # Top bar / filter panel / legend modal (Fase 4)
+    # ==================================================================
+
+    # Colores de la leyenda. Centralizar aqui hasta que la Fase 5 los
+    # importe desde domain/estados.py.
+    plano_state_colors = {
+        "S0": "#FFFFFF",  # Pure White - Borrador
+        "S1": "#FFFF00",  # Yellow - Revisado por Delineación
+        "S2": "#00AAE4",  # Blue - Revisado por Técnico Especialista
+        "S3": "#B19CD9",  # Purple - Revisado por Director Proyecto
+        "S3A": "#008F39", # Green - Aprobado por propiedad/promotor
+        "D": "#FF0000",   # Red - Denegado
+    }
+
+    def _create_top_bar(self, parent: tk.Widget) -> None:
+        """
+        Crea la barra superior con 3 zonas:
+          - izquierda: boton [▼ Filtratge] (despliega el panel de filtros)
+          - centro:    titulo "PLANOS" en grande
+          - derecha:   [✎ Editar] + [▼ Leyenda de Estados] (modal)
+        """
+        top_bar = ttk.Frame(parent)
+        top_bar.pack(fill="x", pady=(0, 4))
+        top_bar.columnconfigure(0, weight=0)
+        top_bar.columnconfigure(1, weight=1)
+        top_bar.columnconfigure(2, weight=0)
+
+        # Izquierda: filter toggle
+        self.filter_panel_visible = False
+        self.filter_toggle_button = ttk.Button(
+            top_bar,
+            text="▼ Filtratge",
+            command=self._toggle_filter_panel,
+        )
+        self.filter_toggle_button.grid(row=0, column=0, sticky="w", padx=(0, 8))
+
+        # Centro: titulo PLANOS
+        ttk.Label(
+            top_bar,
+            text="PLANOS",
+            font=("Arial", 24, "bold"),
+            foreground="#2E5984",
+        ).grid(row=0, column=1, sticky="ew")
+
+        # Derecha: acciones (Editar + Leyenda)
+        actions_frame = ttk.Frame(top_bar)
+        actions_frame.grid(row=0, column=2, sticky="e")
+
+        edit_callback = (self.callbacks or {}).get('edit_project')
+        if edit_callback:
+            self.edit_button = ttk.Button(
+                actions_frame,
+                text="✎ Editar",
+                command=edit_callback,
+            )
+            self.edit_button.pack(side="left", padx=(0, 6))
+
+        self.legend_button = ttk.Button(
+            actions_frame,
+            text="▼ Leyenda de Estados",
+            command=self._show_legend_modal,
+        )
+        self.legend_button.pack(side="left")
+
+    def _create_filter_panel(self, parent: tk.Widget) -> None:
+        """
+        Crea el panel de filtros (colapsado por defecto). El layout interno
+        replica el que existia en la version anterior: 6 filas con todos
+        los filtros actuales. Las StringVar/BooleanVar mantienen el mismo
+        nombre para no romper _apply_filters ni _clear_filters.
+        """
+        # Recordamos el parent para poder hacer pack/pack_forget desde el
+        # toggle sin pasarselo cada vez.
+        self._filter_panel_parent = parent
+
+        self.filter_panel = ttk.LabelFrame(parent, text="Filtros", padding=8)
+        # No se hace pack inicial: el panel arranca oculto.
+
+        filter_frame = ttk.Frame(self.filter_panel)
+        filter_frame.pack(fill="x")
+
+        # Buscar por nombre (row 0)
         ttk.Label(filter_frame, text="Buscar por nombre:").grid(row=0, column=0, padx=5, sticky="w")
         self.filter_id_var = tk.StringVar()
         self.filter_id_entry = ttk.Entry(filter_frame, textvariable=self.filter_id_var, width=20)
         self.filter_id_entry.grid(row=0, column=1, padx=5, sticky="w")
         self.filter_id_entry.bind('<KeyRelease>', lambda e: self._apply_filters())
-        
-        # Filter by status (row 1)
+
+        # Filtrar por Estado (row 1)
         ttk.Label(filter_frame, text="Filtrar por Estado:").grid(row=1, column=0, padx=5, sticky="w", pady=(5, 0))
         self.filter_state_var = tk.StringVar(value="Todos")
         state_values = ["Todos"] + list(STATE_DISPLAY_NAMES.values())
@@ -166,8 +223,8 @@ class PlanosDashboard(ResponsiveBaseView):
         )
         self.filter_state_combo.grid(row=1, column=1, padx=5, sticky="w", pady=(5, 0))
         self.filter_state_combo.bind('<<ComboboxSelected>>', lambda e: self._apply_filters())
-        
-        # Filter by project phase (row 2)
+
+        # Filtrar por Fase (row 2)
         ttk.Label(filter_frame, text="Filtrar por Fase:").grid(row=2, column=0, padx=5, sticky="w", pady=(5, 0))
         self.filter_phase_var = tk.StringVar(value="Todas")
         phase_values = ["Todas", "Implantación", "Proyecto Básico", "Proyecto Ejecutivo", "Dirección Obra"]
@@ -180,113 +237,117 @@ class PlanosDashboard(ResponsiveBaseView):
         )
         self.filter_phase_combo.grid(row=2, column=1, padx=5, sticky="w", pady=(5, 0))
         self.filter_phase_combo.bind('<<ComboboxSelected>>', lambda e: self._apply_filters())
-        
-        # Filter by user name (row 3)
+
+        # Filtrar por Usuario (row 3)
         ttk.Label(filter_frame, text="Filtrar por Usuario:").grid(row=3, column=0, padx=5, sticky="w", pady=(5, 0))
         self.filter_user_var = tk.StringVar()
         self.filter_user_entry = ttk.Entry(filter_frame, textvariable=self.filter_user_var, width=20)
         self.filter_user_entry.grid(row=3, column=1, padx=5, sticky="w", pady=(5, 0))
         self.filter_user_entry.bind('<KeyRelease>', lambda e: self._apply_filters())
-        
-        # File type filter (row 4)
+
+        # Tipos de Archivo (row 4)
         ttk.Label(filter_frame, text="Tipos de Archivo:").grid(row=4, column=0, padx=5, sticky="w", pady=(5, 0))
         file_type_frame = ttk.Frame(filter_frame)
         file_type_frame.grid(row=4, column=1, padx=5, sticky="w", pady=(5, 0))
-        
-        # Create checkboxes for each file type
         for i, (ext, var) in enumerate(self.file_type_filters.items()):
             cb = ttk.Checkbutton(
                 file_type_frame,
                 text=ext.upper(),
                 variable=var,
-                command=self._apply_filters
+                command=self._apply_filters,
             )
             cb.grid(row=0, column=i, padx=(0, 8), sticky="w")
-        
-        # Clear filters button (row 5)
+
+        # Limpiar Filtros (row 5)
         ttk.Button(
             filter_frame,
             text="Limpiar Filtros",
-            command=self._clear_filters
+            command=self._clear_filters,
         ).grid(row=5, column=0, columnspan=2, padx=5, sticky="w", pady=(5, 0))
-        
-        # Legend panel (right side) - collapsible with dropdown button
-        legend_container = ttk.Frame(top_frame)
-        legend_container.grid(row=0, column=1, sticky="e", padx=10)
 
-        # Top-right actions: Editar + Leyenda en la misma fila.
-        # 'edit_project' lo inyecta el handler (PlanosHandler) y apunta a
-        # AppController.show_project_edit.
-        actions_frame = ttk.Frame(legend_container)
-        actions_frame.pack(anchor="e")
-
-        edit_callback = (self.callbacks or {}).get('edit_project')
-        if edit_callback:
-            self.edit_button = ttk.Button(
-                actions_frame,
-                text="✎ Editar",
-                command=edit_callback,
-            )
-            self.edit_button.pack(side="left", padx=(0, 6))
-
-        # Legend toggle button
-        self.legend_visible = False
-        self.legend_button = ttk.Button(
-            actions_frame,
-            text="▼ Leyenda de Estados",
-            command=self._toggle_legend
-        )
-        self.legend_button.pack(side="left")
-        
-        # Legend frame (initially hidden)
-        self.legend_frame = ttk.Frame(legend_container)
-        # Don't pack initially - will be shown when toggled
-        
-        # Color legend entries - standardized colors
-        self.plano_state_colors = {
-            "S0": "#FFFFFF",  # Pure White - Borrador
-            "S1": "#FFFF00",  # Yellow - Revisado por Delineación
-            "S2": "#00AAE4",  # Blue - Revisado por Técnico Especialista
-            "S3": "#B19CD9",  # Purple - Revisado por Director Proyecto
-            "S3A": "#008F39", # Green - Aprobado por propiedad/promotor
-            "D": "#FF0000"    # Red - Denegado
-        }
-        
-        # Create legend content (but don't show initially)
-        self._create_legend_content()
-
-    def _toggle_legend(self) -> None:
-        """Toggle the visibility of the legend panel"""
-        if self.legend_visible:
-            # Hide legend
-            self.legend_frame.pack_forget()
-            self.legend_button.config(text="▼ Leyenda de Estados")
-            self.legend_visible = False
+    def _toggle_filter_panel(self) -> None:
+        """Despliega o colapsa el panel de filtros."""
+        if self.filter_panel_visible:
+            self.filter_panel.pack_forget()
+            self.filter_toggle_button.config(text="▼ Filtratge")
+            self.filter_panel_visible = False
         else:
-            # Show legend
-            self.legend_frame.pack(pady=(5, 0), anchor="e")
-            self.legend_button.config(text="▲ Leyenda de Estados")
-            self.legend_visible = True
+            # winfo_children() devuelve TODOS los hijos (esten packed o no),
+            # asi que self.filter_panel aparece en la lista aunque no este
+            # mostrado. Hay que excluirlo para no hacer pack(before=self).
+            children = [
+                c for c in self._filter_panel_parent.winfo_children()
+                if c is not self.filter_panel
+            ]
+            # Tras filtrar: children[0] = top_bar, children[1] = refresh_frame.
+            # Queremos que el panel aparezca entre ambos.
+            anchor = children[1] if len(children) > 1 else None
+            if anchor is not None:
+                self.filter_panel.pack(fill="x", pady=(0, 6), before=anchor)
+            else:
+                self.filter_panel.pack(fill="x", pady=(0, 6))
+            self.filter_toggle_button.config(text="▲ Filtratge")
+            self.filter_panel_visible = True
 
-    def _create_legend_content(self) -> None:
-        """Create the legend content inside the legend frame"""
-        # Clear existing content
-        for widget in self.legend_frame.winfo_children():
-            widget.destroy()
-        
-        # Create a labeled frame for the legend
-        legend_content = ttk.LabelFrame(self.legend_frame, text="Estados", padding=10)
-        legend_content.pack(fill="both", expand=True)
-        
+    def _show_legend_modal(self) -> None:
+        """
+        Abre la leyenda como modal (Toplevel). Decision Fase 4: 'modal
+        porque no roba espacio permanente' (REFACTOR_PLAN seccion 7).
+        La Fase 5 reutilizara este modal centralizando ESTADO_A_COLOR.
+        """
+        win = tk.Toplevel(self.root)
+        win.title("Leyenda de Estados")
+        win.transient(self.root)
+        win.grab_set()
+        win.resizable(False, False)
+
+        container = ttk.Frame(win, padding=14)
+        container.pack(fill="both", expand=True)
+
+        ttk.Label(
+            container,
+            text="Leyenda de estados",
+            font=("Arial", 12, "bold"),
+        ).pack(anchor="w", pady=(0, 8))
+
+        # Tabla: muestra de color + nombre. Igual que el panel anterior.
+        table = ttk.Frame(container)
+        table.pack(fill="x")
         for i, (status, color) in enumerate(self.plano_state_colors.items()):
-            color_label = tk.Label(legend_content, text="  ", bg=color)
-            color_label.grid(row=i, column=0, pady=2, sticky="w")
-            text_label = ttk.Label(legend_content, text=f" {STATE_DISPLAY_NAMES.get(status, status)}")
-            text_label.grid(row=i, column=1, pady=2, sticky="w")
-        
-        # Info button
-        info_button = ttk.Button(legend_content, text="?", command=self._show_status_info, width=2)
-        info_button.grid(row=0, column=2, rowspan=len(self.plano_state_colors), sticky="ns", padx=(5,0))
+            color_sample = tk.Label(table, text="  ", bg=color, relief="solid", borderwidth=1, width=4)
+            color_sample.grid(row=i, column=0, padx=(0, 8), pady=3, sticky="w")
+            ttk.Label(
+                table,
+                text=STATE_DISPLAY_NAMES.get(status, status),
+            ).grid(row=i, column=1, sticky="w", pady=3)
+
+        # Info adicional + boton Cerrar.
+        ttk.Button(
+            container,
+            text="Mas detalles…",
+            command=self._show_status_info,
+        ).pack(anchor="w", pady=(12, 0))
+
+        btn_frame = ttk.Frame(container)
+        btn_frame.pack(fill="x", pady=(12, 0))
+        ttk.Button(btn_frame, text="Cerrar", command=win.destroy).pack(side="right")
+
+        # Centrar relativo al padre.
+        win.update_idletasks()
+        try:
+            px = self.root.winfo_rootx()
+            py = self.root.winfo_rooty()
+            pw = self.root.winfo_width()
+            ph = self.root.winfo_height()
+            ww = win.winfo_width()
+            wh = win.winfo_height()
+            x = px + (pw - ww) // 2
+            y = py + (ph - wh) // 2
+            win.geometry(f"+{max(x, 0)}+{max(y, 0)}")
+        except tk.TclError:
+            pass
+
+        win.protocol("WM_DELETE_WINDOW", win.destroy)
 
     def _show_status_info(self) -> None:
         """Show status information popup - exactly like original."""
@@ -322,42 +383,47 @@ class PlanosDashboard(ResponsiveBaseView):
 
 
     def _create_document_list(self, parent: tk.Widget, callbacks: dict) -> None:
-        """Create document list table"""
-        list_frame = ttk.LabelFrame(parent, text="Documentos", padding="8")
-        list_frame.pack(fill="both", expand=True, pady=(0, 8))
-        
-        # Create treeview with scrollbars
-        tree_frame = ttk.Frame(list_frame)
-        tree_frame.pack(fill="both", expand=True)
-        
-        # Columns (added Phase column and Referencias column)
-        columns = ("Nombre", "Estado", "Fase", "Versión", "Referencias", "Fecha", "Autor", "Rev. Téc.", "Rev. Ger.", "Notas")
-        self.tree = ttk.Treeview(tree_frame, columns=columns, show="headings", height=8, selectmode="extended")
-        
-        # Configure columns
-        self.tree.heading("Nombre", text="Nombre")
-        self.tree.heading("Estado", text="Estado")
-        self.tree.heading("Fase", text="Fase del Proyecto")
-        self.tree.heading("Versión", text="Versión")
-        self.tree.heading("Referencias", text="Referencias")
-        self.tree.heading("Fecha", text="Fecha")
-        self.tree.heading("Autor", text="Autor")
-        self.tree.heading("Rev. Téc.", text="Rev. Téc.")
-        self.tree.heading("Rev. Ger.", text="Rev. Ger.")
-        self.tree.heading("Notas", text="Notas")
-        
-        # Configure column widths
-        # Set stretch=False to allow horizontal scrolling for long content (especially Notas)
-        self.tree.column("Nombre", width=180, minwidth=140, stretch=False)
-        self.tree.column("Estado", width=70, minwidth=50, stretch=False)
-        self.tree.column("Fase", width=110, minwidth=90, stretch=False)
-        self.tree.column("Versión", width=70, minwidth=50, stretch=False)
-        self.tree.column("Referencias", width=90, minwidth=70, stretch=False)
-        self.tree.column("Fecha", width=100, minwidth=80, stretch=False)
-        self.tree.column("Autor", width=90, minwidth=70, stretch=False)
-        self.tree.column("Rev. Téc.", width=90, minwidth=70, stretch=False)
-        self.tree.column("Rev. Ger.", width=90, minwidth=70, stretch=False)
-        self.tree.column("Notas", width=500, minwidth=200, stretch=False)
+        """
+        Tabla central con las 10 columnas exactas del REFACTOR_PLAN seccion 6.
+
+        Cambios Fase 4:
+          - Sin LabelFrame envolvente (la tabla ocupa todo el espacio).
+          - Orden y nombres de columnas alineados con la nueva especificacion.
+          - Columnas 'Codigo' y 'Tipo archivo' se leen del documento si el
+            modelo las expone, si no quedan vacias (placeholder hasta que
+            futuras fases las pueblen).
+        """
+        # Create treeview with scrollbars directly in parent (no LabelFrame).
+        tree_frame = ttk.Frame(parent)
+        tree_frame.pack(fill="both", expand=True, pady=(0, 4))
+
+        # Columnas en el orden exacto del REFACTOR_PLAN seccion 6.
+        columns = (
+            "Código", "Nombre", "Tipo archivo", "Estado", "Versión",
+            "Fase requerida", "Fecha", "Autor",
+            "Revisión Técnica", "Revisión Gerencia",
+        )
+        self.tree = ttk.Treeview(
+            tree_frame, columns=columns, show="headings",
+            height=12, selectmode="extended",
+        )
+
+        # Headings (texto visible = nombre de columna).
+        for col in columns:
+            self.tree.heading(col, text=col)
+
+        # Anchuras razonables. stretch=False para que la suma horizontal
+        # active el h_scrollbar y las columnas no se compriman.
+        self.tree.column("Código",             width=100, minwidth=70,  stretch=False)
+        self.tree.column("Nombre",             width=200, minwidth=140, stretch=False)
+        self.tree.column("Tipo archivo",       width=90,  minwidth=70,  stretch=False)
+        self.tree.column("Estado",             width=70,  minwidth=50,  stretch=False, anchor="center")
+        self.tree.column("Versión",            width=70,  minwidth=50,  stretch=False, anchor="center")
+        self.tree.column("Fase requerida",     width=130, minwidth=90,  stretch=False)
+        self.tree.column("Fecha",              width=110, minwidth=80,  stretch=False, anchor="center")
+        self.tree.column("Autor",              width=80,  minwidth=60,  stretch=False, anchor="center")
+        self.tree.column("Revisión Técnica",   width=120, minwidth=90,  stretch=False, anchor="center")
+        self.tree.column("Revisión Gerencia",  width=130, minwidth=100, stretch=False, anchor="center")
         
         # Scrollbars
         v_scrollbar = ttk.Scrollbar(tree_frame, orient="vertical", command=self.tree.yview)
@@ -740,41 +806,23 @@ class PlanosDashboard(ResponsiveBaseView):
         """Refresh the document list table"""
         # Clear all items at once (much faster)
         self.tree.delete(*self.tree.get_children())
-        
-        # Add filtered documents with color coding
+
+        # Add filtered documents with color coding. Delegamos la construccion
+        # del tuple a _get_tree_values_for_plano para evitar duplicacion y
+        # mantener un unico sitio donde mapear PlanoDocument -> columnas.
         for doc in self.filtered_documents:
             # Determine color tag based on current state
             state_tag = doc.current_state if doc.current_state in PLANO_STATES else "default"
-            
-            # Remove 'v' prefix from version display
-            version_display = doc.current_version.lstrip('v') if doc.current_version.startswith('v') else doc.current_version
-            
-            # Format date to day-month-year hour:minute
-            fecha_display = self._format_date(doc.creation_date)
-            
-            # Get project phase (with fallback for compatibility)
-            project_phase = getattr(doc, 'project_phase', 'Implantación')
-            
-            # Get XREF references status
-            referencias_status = self._get_referencias_status(doc)
-            
+
             # Use the document name as the Treeview item id (iid) to ensure we
             # can properly identify the document when handling double-click actions.
-            # Display column shows the actual attached filename, not the plano's
-            # logical name — keeps the iid as doc.name for selection lookups.
-            self.tree.insert("", "end", iid=doc.name, values=(
-                self._get_display_filename(doc),
-                doc.current_state,
-                project_phase,
-                version_display,
-                referencias_status,
-                fecha_display,
-                doc.autor,
-                doc.rev_tecnica,
-                doc.rev_gerencia,
-                doc.latest_notes or ""
-            ), tags=(state_tag,))
-        
+            self.tree.insert(
+                "", "end",
+                iid=doc.name,
+                values=self._get_tree_values_for_plano(doc),
+                tags=(state_tag,),
+            )
+
         # Update status bar
         if hasattr(self, 'status_label'):
             self.status_label.config(text=f"Mostrando: {len(self.filtered_documents)} de {len(self.documents)} documentos")
@@ -1104,14 +1152,14 @@ class PlanosDashboard(ResponsiveBaseView):
         """Get the name of the currently selected document (kept method name for compatibility)"""
         selection = self.tree.selection()
         if selection:
-            item = self.tree.item(selection[0])
-            # First column is full name (no truncation)
-            name_display = item['values'][0]
-            # Validate against filtered documents and return exact match if present
+            # Las filas se insertan con iid=doc.name (ver _refresh_document_list
+            # y _on_select_document); el iid es la fuente de verdad del id,
+            # independientemente del orden de las columnas visibles.
+            primary_id = selection[0]
             for doc in self.filtered_documents:
-                if doc.name == name_display:
+                if doc.name == primary_id:
                     return doc.name
-            return name_display
+            return primary_id
         return ""
     
     def get_selected_document_name(self) -> str:
@@ -1418,26 +1466,40 @@ class PlanosDashboard(ResponsiveBaseView):
         return Path(chosen).name
 
     def _get_tree_values_for_plano(self, doc: PlanoDocument) -> tuple:
-        """Get tree values tuple for a plano document (added Phase column)."""
+        """
+        Tupla de 10 valores en el orden del REFACTOR_PLAN seccion 6.
+
+        Columnas que aun no expone el modelo PlanoDocument (Codigo,
+        Tipo archivo) se intentan leer via getattr y caen a '' si no
+        existen. Asi se rellenaran solas cuando una fase futura amplie
+        el modelo / controller a leer la tabla `planos` nueva.
+        """
         # Remove 'v' prefix from version display
-        version_display = doc.current_version.lstrip('v') if doc.current_version.startswith('v') else doc.current_version
+        version_display = (
+            doc.current_version.lstrip('v')
+            if doc.current_version.startswith('v')
+            else doc.current_version
+        )
 
-        # Format date to day-month-year hour:minute
         fecha_display = self._format_date(doc.creation_date)
-
-        # Get project phase (with fallback for compatibility)
         project_phase = getattr(doc, 'project_phase', 'Implantación')
 
+        # Codigo y tipo_archivo no estan aun en PlanoDocument; getattr
+        # con default '' evita AttributeError y deja la celda vacia.
+        codigo = getattr(doc, 'codigo', '') or ''
+        tipo_archivo = getattr(doc, 'tipo_archivo', '') or ''
+
         return (
+            codigo,
             self._get_display_filename(doc),
+            tipo_archivo,
             doc.current_state,
-            project_phase,
             version_display,
+            project_phase,
             fecha_display,
             doc.autor,
             doc.rev_tecnica,
             doc.rev_gerencia,
-            doc.latest_notes or ""
         )
     
     def _highlight_changed_row(self, item) -> None:
