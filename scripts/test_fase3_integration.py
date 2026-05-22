@@ -92,20 +92,21 @@ def test_load_project_for_edit() -> dict:
         _fail("nombre esta vacio")
 
     planos = data.get("planos", [])
-    if len(planos) != 5:
-        _fail(f"esperados 5 planos (3 oblig + 2 det), encontrados {len(planos)}")
+    if len(planos) != 6:
+        _fail(f"esperados 6 planos (3 oblig + 3 det), encontrados {len(planos)}")
     obligs = [p for p in planos if p["obligatorio"]]
     detalles = [p for p in planos if not p["obligatorio"]]
-    if len(obligs) != 3 or len(detalles) != 2:
+    if len(obligs) != 3 or len(detalles) != 3:
         _fail(
-            f"reparto esperado 3 oblig + 2 detalles, obtenido "
+            f"reparto esperado 3 oblig + 3 detalles, obtenido "
             f"{len(obligs)} + {len(detalles)}"
         )
     nombres_det = {p["nombre"] for p in detalles}
-    if nombres_det != {"Detalle_Con_Historial", "Detalle_Solo_Archivos"}:
+    expected_det = {"Detalle_Con_Historial", "Detalle_Solo_Archivos", "Detalle_Multi_Archivo"}
+    if nombres_det != expected_det:
         _fail(f"detalles inesperados: {nombres_det}")
 
-    _ok(f"5 planos cargados ({len(obligs)} obligatorios + {len(detalles)} detalles)")
+    _ok(f"6 planos cargados ({len(obligs)} obligatorios + {len(detalles)} detalles)")
     return data
 
 

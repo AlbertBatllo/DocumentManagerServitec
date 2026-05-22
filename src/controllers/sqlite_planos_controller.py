@@ -488,11 +488,25 @@ class SQLitePlanosController:
         
         return success_message
 
-    def get_all_documents(self) -> List[SQLiteDocument]:
-        """Get all plano documents from SQLite database."""
-        return SQLiteDocument.load_all_from_database(
-            self.db_manager, "planos", self.current_user
-        )
+    def get_all_documents(self) -> List["PlanoView"]:
+        """
+        Devuelve la lista de planos del proyecto leyendo del modelo
+        nuevo (tablas `planos` + `archivos` de Fase 1).
+
+        Fase 5.5: antes esto leia de la tabla legacy `documents`, lo
+        que para proyectos creados post-refactor devolvia [] (el
+        dashboard mostraba "Total: 0 documentos"). Ahora delegamos en
+        PlanoView que lee de la fuente correcta.
+
+        Los uploads legacy huerfanos (subidas hechas via los controllers
+        actuales que aun escriben a documents/document_entries) son
+        portados automaticamente al nuevo schema por
+        `bridge_legacy_uploads`, ejecutado en cada
+        `ensure_project_database`. Asi el dashboard ve toda la historia
+        del proyecto sin importar por que ruta entro cada archivo.
+        """
+        from models.plano_view import PlanoView
+        return PlanoView.load_all_for_project(self.db_manager)
 
     def get_document(self, doc_name: str) -> Optional[SQLiteDocument]:
         """Get specific document by name."""

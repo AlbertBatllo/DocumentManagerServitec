@@ -106,3 +106,8 @@ Thumbs.db
 ehthumbs.db
 Desktop.ini
 .DS_Store
+
+# Projectes de prova / projectes reals
+# (la app espera projectes germans de repo/ a AEC-DocumentManager/,
+#  però si el seed o el cwd els crea dins de repo/ no els volem versionar)
+PRJ-*/

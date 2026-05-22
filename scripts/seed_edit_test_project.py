@@ -7,7 +7,7 @@ Crea:
       usa la app: `get_projects_root()`).
     - BD inicializada con la migracion Fase 1 aplicada.
     - Fila en `proyectos` con tipo, nombre, lugar, descripcion poblados.
-    - 3 planos obligatorios + 2 detalles.
+    - 3 planos obligatorios + 3 detalles.
     - Para uno de los detalles ("Detalle_Con_Historial"):
         * 2 filas en `archivos` simulando subidas anteriores.
         * 2 filas en `plano_estado_historial` (GRIS -> BLANCO -> S1).
@@ -16,6 +16,15 @@ Crea:
     - Para otro detalle ("Detalle_Solo_Archivos"):
         * 1 fila en `archivos`, sin historial de estados.
       Esto activa la rama "no_history" del dialogo.
+    - Para el tercer detalle ("Detalle_Multi_Archivo"):
+        * 3 filas en `archivos` (v1.0, v1.1, v2.0) para validar
+          visualmente la columna Version con la mas reciente y el
+          historial via Ver Historial.
+        * Estado actual del plano = 'S2' (verde) para cubrir un color
+          distinto al S1 (amarillo) de Detalle_Con_Historial.
+      El test 5 de test_fase3_integration.py NO toca este plano, asi
+      que sobrevive a la batería y queda disponible para validacion
+      visual permanente en el dashboard.
 
 Uso:
     cd repo
@@ -98,10 +107,13 @@ def main() -> int:
                 (proyecto_id, nombre, nombre, orden),
             )
 
-        # 2 detalles, uno con historial y archivos, otro solo con archivos.
+        # 3 detalles: uno con historial y archivos, otro solo con
+        # archivos, y un tercero con multiples archivos en estado S2
+        # (verde) para validar visualmente otro color del modelo Fase 5.
         detalles = [
             ("Detalle_Con_Historial", "S1"),     # has_history
             ("Detalle_Solo_Archivos", "GRIS"),   # no_history
+            ("Detalle_Multi_Archivo", "S2"),     # validacion visual S2
         ]
         detalle_ids = {}
         for offset, (nombre, estado_final) in enumerate(detalles):
@@ -164,12 +176,44 @@ def main() -> int:
             (detalle_ids["Detalle_Solo_Archivos"], "Detalle_Solo_Archivos_v1.0.pdf"),
         )
 
+        # Detalle_Multi_Archivo: 3 versiones para validar Treeview con
+        # mas de un archivo (el dashboard muestra el mas reciente).
+        plano_id_multi = detalle_ids["Detalle_Multi_Archivo"]
+        tres_dias = (datetime.now() - timedelta(days=3)).isoformat(timespec="seconds")
+        dia_y_medio = (datetime.now() - timedelta(hours=36)).isoformat(timespec="seconds")
+        hace_un_rato = (datetime.now() - timedelta(hours=2)).isoformat(timespec="seconds")
+        conn.execute(
+            """
+            INSERT INTO archivos
+            (plano_id, version, autor, fecha, comentarios, ruta_archivo)
+            VALUES (?, '1.0', 'EF', ?, 'Primera version', ?)
+            """,
+            (plano_id_multi, tres_dias, "Detalle_Multi_Archivo_v1.0_S0.pdf"),
+        )
+        conn.execute(
+            """
+            INSERT INTO archivos
+            (plano_id, version, autor, fecha, comentarios, motivo_subida, ruta_archivo)
+            VALUES (?, '1.1', 'EF', ?, 'Pequenas correcciones', 'Revision interna', ?)
+            """,
+            (plano_id_multi, dia_y_medio, "Detalle_Multi_Archivo_v1.1_S1.pdf"),
+        )
+        conn.execute(
+            """
+            INSERT INTO archivos
+            (plano_id, version, autor, fecha, comentarios, motivo_subida, ruta_archivo)
+            VALUES (?, '2.0', 'GH', ?, 'Aprobacion tecnica', 'Cambio de fase', ?)
+            """,
+            (plano_id_multi, hace_un_rato, "Detalle_Multi_Archivo_v2.0_S2.pdf"),
+        )
+
     print(f"[4/4] OK. Proyecto creado en: {folder}")
     print()
     print("Resumen del estado generado:")
-    print("  - Obligatorios (sin archivos, sin historial) -> rama 'safe'")
-    print("  - Detalle_Solo_Archivos (1 archivo, 0 historial) -> 'no_history'")
-    print("  - Detalle_Con_Historial (2 archivos, 2 historial) -> 'has_history'")
+    print("  - Obligatorios (sin archivos, sin historial) -> rama 'safe', color GRIS")
+    print("  - Detalle_Solo_Archivos (1 archivo, 0 historial) -> 'no_history', color GRIS")
+    print("  - Detalle_Con_Historial (2 archivos, 2 historial) -> 'has_history', color S1 amarillo")
+    print("  - Detalle_Multi_Archivo (3 archivos, 0 historial) -> color S2 verde")
     print()
     print(f"Para probarlo: arranca la app, selecciona '{PROJECT_CODE}', tipo "
           "'Planos', pulsa '✎ Editar' y prueba a borrar cada plano.")

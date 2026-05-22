@@ -368,3 +368,172 @@ def apply_refactor_fase1(
         "backup_path": str(backup_path) if backup_path else None,
         "counts": counts,
     }
+
+
+def bridge_legacy_uploads(
+    conn: sqlite3.Connection,
+    project_path: Path,
+) -> int:
+    """
+    Puente entre el sistema legacy (documents / document_entries) y el
+    modelo nuevo (planos / archivos) para uploads huerfanos.
+
+    Caso de uso: tras aplicar la migracion de Fase 1, los controllers
+    de subida actuales (SQLitePlanosController.add_new_document /
+    add_new_version) siguen escribiendo a documents y document_entries.
+    Mientras la Fase 6/7 no los reescriba, cualquier archivo subido por
+    esa via no apareceria en el dashboard, que ahora lee de planos +
+    archivos via PlanoView.
+
+    Esta funcion detecta esa grieta y la cierra: para cada
+    document_entries sin contrapart en archivos, crea la fila en
+    archivos (y, si hace falta, su plano en la tabla nueva).
+    Idempotente: si no hay nada huerfano, no toca nada.
+
+    Devuelve el numero de uploads portadas. Si > 0, logueja una linea
+    informativa para que sepamos sobre que BD ha actuado.
+
+    Pensado para llamarse desde ensure_project_database en cada
+    arranque. El coste si no hay dato huerfano es una unica query de
+    LIMIT 1, despreciable.
+    """
+    # 0. Salida rapida si las tablas legacy no existen o no tienen
+    #    entries (caso de proyectos nuevos creados despues del refactor).
+    try:
+        row = conn.execute(
+            "SELECT 1 FROM document_entries LIMIT 1"
+        ).fetchone()
+    except sqlite3.OperationalError:
+        return 0
+    if row is None:
+        return 0
+
+    # 1. Necesitamos un proyecto al que asociar planos huerfanos.
+    proyecto_row = conn.execute(
+        "SELECT id FROM proyectos LIMIT 1"
+    ).fetchone()
+    if proyecto_row is None:
+        return 0
+    proyecto_id = proyecto_row["id"] if hasattr(proyecto_row, "keys") else proyecto_row[0]
+
+    # 2. Documents (tipo planos) sin contrapart en planos por `codigo`.
+    #    apply_refactor_fase1 preserva ids al migrar; los huerfanos son
+    #    inserts post-migracion via los controllers legacy.
+    pending_docs = conn.execute(
+        """
+        SELECT d.id, d.name, d.current_version, d.current_state, d.autor,
+               d.rev_tecnica, d.rev_gerencia, d.project_phase, d.file_type,
+               d.updated_at
+        FROM documents d
+        WHERE d.document_type = 'planos'
+          AND NOT EXISTS (SELECT 1 FROM planos p WHERE p.codigo = d.name)
+        """
+    ).fetchall()
+
+    # 3. Mapping document_id -> plano_id (existentes y nuevos) para
+    #    saber a que plano vincular cada entry.
+    doc_id_to_plano_id: dict = {}
+
+    # 3a. Crear planos faltantes. Estado derivado del legacy via el
+    #     mismo mapping que uso apply_refactor_fase1.
+    for row in pending_docs:
+        estado_nuevo = _STATE_MAP.get(row["current_state"], "GRIS")
+        orden_row = conn.execute(
+            "SELECT COALESCE(MAX(orden), 0) + 1 AS o FROM planos WHERE proyecto_id = ?",
+            (proyecto_id,),
+        ).fetchone()
+        next_orden = orden_row["o"] if hasattr(orden_row, "keys") else orden_row[0]
+
+        cur = conn.execute(
+            """
+            INSERT INTO planos
+            (proyecto_id, codigo, nombre, tipo_archivo, obligatorio,
+             orden, estado, version, fase_requerida, fecha, autor,
+             revision_tecnica, revision_gerencia)
+            VALUES (?, ?, ?, ?, 0, ?, ?, ?, ?, ?, ?, ?, ?)
+            """,
+            (
+                proyecto_id,
+                row["name"],
+                row["name"],
+                row["file_type"] or None,
+                next_orden,
+                estado_nuevo,
+                row["current_version"] or None,
+                row["project_phase"] or None,
+                row["updated_at"],
+                row["autor"] or None,
+                row["rev_tecnica"] or None,
+                row["rev_gerencia"] or None,
+            ),
+        )
+        doc_id_to_plano_id[row["id"]] = cur.lastrowid
+
+    # 3b. Completar el mapping con los documents que YA tenian plano.
+    for row in conn.execute(
+        """
+        SELECT d.id AS doc_id, p.id AS plano_id
+        FROM documents d
+        JOIN planos p ON p.codigo = d.name
+        WHERE d.document_type = 'planos'
+        """
+    ):
+        doc_id_to_plano_id.setdefault(row["doc_id"], row["plano_id"])
+
+    # 4. Para cada document_entry, comprobar si existe ya su archivo y,
+    #    si no, insertarlo. Matching pragmatico por (plano_id, version,
+    #    timestamp); en la practica es unico para entries reales.
+    all_entries = conn.execute(
+        """
+        SELECT de.id, de.document_id, de.version, de.author, de.timestamp,
+               de.notes, de.file_path
+        FROM document_entries de
+        JOIN documents d ON d.id = de.document_id
+        WHERE d.document_type = 'planos'
+        """
+    ).fetchall()
+
+    bridged = 0
+    for entry in all_entries:
+        plano_id = doc_id_to_plano_id.get(entry["document_id"])
+        if plano_id is None:
+            continue
+        version = entry["version"] or ""
+        timestamp = entry["timestamp"]
+
+        exists = conn.execute(
+            """
+            SELECT 1 FROM archivos
+            WHERE plano_id = ? AND version = ? AND fecha = ?
+            LIMIT 1
+            """,
+            (plano_id, version, timestamp),
+        ).fetchone()
+        if exists is not None:
+            continue
+
+        conn.execute(
+            """
+            INSERT INTO archivos
+            (plano_id, version, autor, fecha, comentarios, ruta_archivo)
+            VALUES (?, ?, ?, ?, ?, ?)
+            """,
+            (
+                plano_id,
+                version,
+                entry["author"] or None,
+                timestamp,
+                entry["notes"] or None,
+                entry["file_path"] or "",
+            ),
+        )
+        bridged += 1
+
+    if bridged > 0:
+        conn.commit()
+        print(
+            f"Bridged {bridged} legacy uploads to new schema for project "
+            f"{project_path.name}"
+        )
+
+    return bridged

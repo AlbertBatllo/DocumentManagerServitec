@@ -1011,4 +1011,18 @@ def ensure_project_database(project_path: Path) -> ProjectDatabaseManager:
         else:
             print(f"✨ New database created for: {project_path.name}")
 
+    # Fase 5.5: en cada arranque, intentar portar uploads legacy
+    # huerfanas al nuevo schema. Idempotente y barato si no hay nada
+    # huerfano (una unica query de LIMIT 1). Si actua, logueja
+    # cuantas filas ha portado y a que proyecto. Cubre la grieta hasta
+    # que la Fase 6/7 reescriba los controllers de subida.
+    try:
+        from utils.database.migrations import bridge_legacy_uploads
+        with db_manager.connection() as conn:
+            bridge_legacy_uploads(conn, project_path)
+    except Exception as e:
+        # No bloquear el arranque por un fallo del puente: el dashboard
+        # seguira viendo el resto de datos correctamente.
+        print(f"[bridge_legacy_uploads] aviso: {e}")
+
     return db_manager

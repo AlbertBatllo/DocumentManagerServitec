@@ -32,6 +32,11 @@ class SQLiteDocument(BaseModel):
     file_paths: List[str] = Field(default_factory=list)  # Associated file paths for efficient operations
     project_phase: str = "Implantación"  # Project phase: Implantación, Proyecto Básico, Proyecto Ejecutivo, Dirección Obra
     associated_dwg: str = ""  # Path to associated DWG file (one DWG can contain multiple layouts)
+    # Estado del plano segun el nuevo modelo (GRIS/BLANCO/S1/S2/S3/ROJO/NARANJA).
+    # NO se persiste desde aqui: lo lee el SQLitePlanosController desde la tabla
+    # `planos` (Fase 1) y lo adjunta al documento para que el dashboard pueda
+    # pintar la fila con el color correcto (Fase 5, utils/estados.py).
+    estado: str = ""
     
     # Keep track of database manager for operations
     db_manager: Optional[Any] = Field(default=None, exclude=True)

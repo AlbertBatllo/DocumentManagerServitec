@@ -3,6 +3,7 @@ from tkinter import ttk, messagebox, filedialog, simpledialog
 from typing import Callable, List, Dict, Optional, Tuple
 from .responsive_base_view import ResponsiveBaseView
 from models.plano_document import PlanoDocument, PLANO_STATES, STATE_DISPLAY_NAMES
+from utils.estados import ESTADOS, ESTADO_A_COLOR, ESTADO_A_NOMBRE
 from utils.smart_refresh_manager import SmartRefreshManager
 from views.components.refresh_indicator import RefreshIndicator
 from views.file_management_panel import FileManagementPanel
@@ -124,17 +125,6 @@ class PlanosDashboard(ResponsiveBaseView):
     # ==================================================================
     # Top bar / filter panel / legend modal (Fase 4)
     # ==================================================================
-
-    # Colores de la leyenda. Centralizar aqui hasta que la Fase 5 los
-    # importe desde domain/estados.py.
-    plano_state_colors = {
-        "S0": "#FFFFFF",  # Pure White - Borrador
-        "S1": "#FFFF00",  # Yellow - Revisado por Delineación
-        "S2": "#00AAE4",  # Blue - Revisado por Técnico Especialista
-        "S3": "#B19CD9",  # Purple - Revisado por Director Proyecto
-        "S3A": "#008F39", # Green - Aprobado por propiedad/promotor
-        "D": "#FF0000",   # Red - Denegado
-    }
 
     def _create_top_bar(self, parent: tk.Widget) -> None:
         """
@@ -291,9 +281,13 @@ class PlanosDashboard(ResponsiveBaseView):
 
     def _show_legend_modal(self) -> None:
         """
-        Abre la leyenda como modal (Toplevel). Decision Fase 4: 'modal
-        porque no roba espacio permanente' (REFACTOR_PLAN seccion 7).
-        La Fase 5 reutilizara este modal centralizando ESTADO_A_COLOR.
+        Modal con la leyenda de los 7 estados nuevos (Fase 5).
+
+        Lee codigos, colores y nombres exclusivamente de utils/estados.py.
+        Cada fila muestra una mostra del color (texto coloreado sobre
+        fondo oscuro, igual que el Treeview del dashboard) y el nombre
+        en castellano. Modal porque no roba espacio permanente
+        (REFACTOR_PLAN seccion 7).
         """
         win = tk.Toplevel(self.root)
         win.title("Leyenda de Estados")
@@ -310,23 +304,38 @@ class PlanosDashboard(ResponsiveBaseView):
             font=("Arial", 12, "bold"),
         ).pack(anchor="w", pady=(0, 8))
 
-        # Tabla: muestra de color + nombre. Igual que el panel anterior.
+        # Tabla: codigo + mostra de color (texto coloreado sobre fondo
+        # oscuro, replicando el aspecto en el Treeview) + nombre.
         table = ttk.Frame(container)
         table.pack(fill="x")
-        for i, (status, color) in enumerate(self.plano_state_colors.items()):
-            color_sample = tk.Label(table, text="  ", bg=color, relief="solid", borderwidth=1, width=4)
-            color_sample.grid(row=i, column=0, padx=(0, 8), pady=3, sticky="w")
-            ttk.Label(
-                table,
-                text=STATE_DISPLAY_NAMES.get(status, status),
-            ).grid(row=i, column=1, sticky="w", pady=3)
 
-        # Info adicional + boton Cerrar.
-        ttk.Button(
-            container,
-            text="Mas detalles…",
-            command=self._show_status_info,
-        ).pack(anchor="w", pady=(12, 0))
+        ttk.Label(table, text="Codigo",  font=("Arial", 9, "bold")).grid(row=0, column=0, sticky="w", padx=(0, 12), pady=(0, 4))
+        ttk.Label(table, text="Muestra", font=("Arial", 9, "bold")).grid(row=0, column=1, sticky="w", padx=(0, 12), pady=(0, 4))
+        ttk.Label(table, text="Nombre",  font=("Arial", 9, "bold")).grid(row=0, column=2, sticky="w", pady=(0, 4))
+
+        for i, estado in enumerate(ESTADOS, start=1):
+            color = ESTADO_A_COLOR[estado]
+            nombre = ESTADO_A_NOMBRE[estado]
+
+            ttk.Label(table, text=estado).grid(
+                row=i, column=0, sticky="w", padx=(0, 12), pady=2,
+            )
+            # Mostra: el mismo texto del codigo pintado con su color
+            # sobre fondo oscuro (#1A1A1A), igual que en el Treeview.
+            tk.Label(
+                table,
+                text=f"  {estado}  ",
+                fg=color,
+                bg="#1A1A1A",
+                font=("Arial", 10, "bold"),
+                relief="solid",
+                borderwidth=1,
+                width=10,
+                anchor="center",
+            ).grid(row=i, column=1, sticky="w", padx=(0, 12), pady=2)
+            ttk.Label(table, text=nombre).grid(
+                row=i, column=2, sticky="w", pady=2,
+            )
 
         btn_frame = ttk.Frame(container)
         btn_frame.pack(fill="x", pady=(12, 0))
@@ -348,39 +357,6 @@ class PlanosDashboard(ResponsiveBaseView):
             pass
 
         win.protocol("WM_DELETE_WINDOW", win.destroy)
-
-    def _show_status_info(self) -> None:
-        """Show status information popup - exactly like original."""
-        info_win = tk.Toplevel(self.root)
-        info_win.title("Información de Estados")
-        info_win.geometry("750x250")
-        info_win.transient(self.root)
-        info_win.grab_set()
-        
-        cols = ('code', 'meaning', 'usage')
-        tree = ttk.Treeview(info_win, columns=cols, show='headings')
-        
-        tree.heading('code', text='Código')
-        tree.heading('meaning', text='Significado')
-        tree.heading('usage', text='Uso Común')
-        tree.column('code', width=60, anchor='center')
-        tree.column('meaning', width=150)
-        tree.column('usage', width=500)
-        
-        status_data = [
-            ("S0", "Borrador", "Trabajo en proceso. NUNCA SE ENVIA A PROPIEDAD EN ESTE ESTADO"),
-            ("S1", "Revisado por Delineación", "NUNCA SE ENVIA A PROPIEDAD EN ESTE ESTADO"),
-            ("S2", "Revisado por Técnico Especialista", "Revisado por técnico especialista."),
-            ("S3", "Revisado por Director Proyecto", "SE PUEDE ENVIAR A PROPIEDAD EN ESTE ESTADO"),
-            ("S3A", "Aprobado por propiedad/promotor", "Aprobado por propiedad/promotor."),
-            ("D", "Denegado", "Documento rechazado. ESTADO FINAL - Sin sincronización en la nube.")
-        ]
-        
-        for row in status_data:
-            tree.insert("", "end", values=row)
-        
-        tree.pack(fill="both", expand=True, padx=10, pady=10)
-
 
     def _create_document_list(self, parent: tk.Widget, callbacks: dict) -> None:
         """
@@ -460,19 +436,24 @@ class PlanosDashboard(ResponsiveBaseView):
         )
 
     def _configure_state_colors(self) -> None:
-        """Configure color tags for different plano states"""
-        # Configure Treeview style to ensure custom colors show through selection
+        """
+        Configura tags de color para los 7 estados nuevos (Fase 5).
+
+        Cada estado tiene un tag `estado_<CODIGO>` con el foreground del
+        mapeo central (utils/estados.ESTADO_A_COLOR). El background se
+        fuerza oscuro y uniforme (#1A1A1A) para garantizar contraste con
+        BLANCO (#FFFFFF), tal como REFACTOR_PLAN.md seccion 3 lo prevee
+        ("Blanco sobre fondo oscuro").
+        """
         style = ttk.Style()
-        
-        # Color coding using standardized colors
-        self.tree.tag_configure("S0", foreground="#FFFFFF", background="#333333")  # Pure White with dark background - Borrador (maximum visibility)
-        self.tree.tag_configure("S1", foreground="#FFFF00", background="#2B2B2B")  # Yellow - Revisado por Delineación with dark background
-        self.tree.tag_configure("S2", foreground="#00AAE4", background="#1A1A1A")  # Blue - Revisado por Técnico Especialista with dark background
-        self.tree.tag_configure("S3", foreground="#B19CD9", background="#1A1A1A")  # Purple - Revisado por Director Proyecto with dark background
-        self.tree.tag_configure("S3A", foreground="#008F39", background="#1A1A1A") # Green - Aprobado por propiedad/promotor with dark background
-        self.tree.tag_configure("D", foreground="#FF0000", background="#1A1A1A")   # Red - Denegado with dark background
-        self.tree.tag_configure("default", foreground="#808080")  # Gray (no black)
-        
+
+        for estado in ESTADOS:
+            self.tree.tag_configure(
+                f"estado_{estado}",
+                foreground=ESTADO_A_COLOR[estado],
+                background="#1A1A1A",
+            )
+
         # Configure Treeview to reduce selection highlighting interference
         try:
             # Completely disable selection highlighting so our custom colors always show
@@ -480,7 +461,7 @@ class PlanosDashboard(ResponsiveBaseView):
             # Also configure focus highlighting
             style.configure("Treeview", focuscolor="none")
             # Map state-specific styling to override selection
-            style.map("Treeview", 
+            style.map("Treeview",
                      selectbackground=[("", "")],
                      selectforeground=[("", "")])
         except Exception:
@@ -811,16 +792,13 @@ class PlanosDashboard(ResponsiveBaseView):
         # del tuple a _get_tree_values_for_plano para evitar duplicacion y
         # mantener un unico sitio donde mapear PlanoDocument -> columnas.
         for doc in self.filtered_documents:
-            # Determine color tag based on current state
-            state_tag = doc.current_state if doc.current_state in PLANO_STATES else "default"
-
-            # Use the document name as the Treeview item id (iid) to ensure we
-            # can properly identify the document when handling double-click actions.
+            # Fase 5: color basado en el nuevo estado (doc.estado), que el
+            # SQLitePlanosController adjunta desde la tabla `planos`.
             self.tree.insert(
                 "", "end",
                 iid=doc.name,
                 values=self._get_tree_values_for_plano(doc),
-                tags=(state_tag,),
+                tags=(self._tag_for_estado(doc),),
             )
 
         # Update status bar
@@ -1333,28 +1311,31 @@ class PlanosDashboard(ResponsiveBaseView):
             
             # Update existing items, add new ones
             for doc in new_documents:
+                state_tag = self._tag_for_estado(doc)
                 if doc.name in tree_items:
                     # Document exists in tree - check if it needs updating
                     item = tree_items[doc.name]
-                    
+
                     # Compare with old version
                     old_doc = old_docs_map.get(doc.name)
                     if old_doc and self._plano_documents_are_different(old_doc, doc):
                         # Document changed - update the tree item
                         new_values = self._get_tree_values_for_plano(doc)
-                        self.tree.item(item, values=new_values)
+                        self.tree.item(item, values=new_values, tags=(state_tag,))
                         changes_count += 1
-                        
+
                         # Brief highlight effect
                         self.root.after(100, lambda i=item: self._highlight_changed_row(i))
-                        
+
                 elif doc.name not in old_docs_map:
                     # New document - add to tree (use doc.name as iid for consistency
                     # with _refresh_document_list so selection lookups work).
                     new_values = self._get_tree_values_for_plano(doc)
-                    new_item = self.tree.insert('', 'end', iid=doc.name, values=new_values)
+                    new_item = self.tree.insert(
+                        '', 'end', iid=doc.name, values=new_values, tags=(state_tag,),
+                    )
                     changes_count += 1
-                    
+
                     # Highlight new row
                     self.root.after(100, lambda i=new_item: self._highlight_changed_row(i))
             
@@ -1374,8 +1355,11 @@ class PlanosDashboard(ResponsiveBaseView):
     
     def _plano_documents_are_different(self, doc1: PlanoDocument, doc2: PlanoDocument) -> bool:
         """Check if two plano documents have different data."""
-        return (doc1.name != doc2.name or 
+        # Fase 5: incluir doc.estado para que el smart refresh repinte la
+        # fila cuando el estado nuevo cambie (ej. tras un revert de Fase 3).
+        return (doc1.name != doc2.name or
                 doc1.current_state != doc2.current_state or
+                getattr(doc1, 'estado', '') != getattr(doc2, 'estado', '') or
                 doc1.current_version != doc2.current_version or
                 doc1.autor != doc2.autor or
                 doc1.rev_tecnica != doc2.rev_tecnica or
@@ -1465,14 +1449,30 @@ class PlanosDashboard(ResponsiveBaseView):
         chosen = (pdfs or dwgs or rvts or pool)[0]
         return Path(chosen).name
 
+    def _tag_for_estado(self, doc) -> str:
+        """
+        Nombre del tag del Treeview para el estado nuevo del documento.
+
+        Fase 5: lee `doc.estado` (poblado por SQLitePlanosController via
+        la tabla `planos`). Si el valor no es uno de los 7 validos, cae
+        a `estado_GRIS` para no romper el rendering.
+        """
+        estado = getattr(doc, 'estado', None)
+        if estado in ESTADOS:
+            return f"estado_{estado}"
+        return "estado_GRIS"
+
     def _get_tree_values_for_plano(self, doc: PlanoDocument) -> tuple:
         """
         Tupla de 10 valores en el orden del REFACTOR_PLAN seccion 6.
 
+        Fase 5: la columna 'Estado' muestra `doc.estado` (codigo nuevo
+        GRIS/BLANCO/S1/S2/S3/ROJO/NARANJA), coherente con el color de
+        la fila y con el modal de Leyenda.
+
         Columnas que aun no expone el modelo PlanoDocument (Codigo,
         Tipo archivo) se intentan leer via getattr y caen a '' si no
-        existen. Asi se rellenaran solas cuando una fase futura amplie
-        el modelo / controller a leer la tabla `planos` nueva.
+        existen.
         """
         # Remove 'v' prefix from version display
         version_display = (
@@ -1489,11 +1489,15 @@ class PlanosDashboard(ResponsiveBaseView):
         codigo = getattr(doc, 'codigo', '') or ''
         tipo_archivo = getattr(doc, 'tipo_archivo', '') or ''
 
+        # Estado nuevo (Fase 5). Si por alguna razon falta, mostrar GRIS
+        # para ser consistente con el tag aplicado por _tag_for_estado.
+        estado_display = getattr(doc, 'estado', None) or 'GRIS'
+
         return (
             codigo,
             self._get_display_filename(doc),
             tipo_archivo,
-            doc.current_state,
+            estado_display,
             version_display,
             project_phase,
             fecha_display,
