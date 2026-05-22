@@ -131,8 +131,8 @@ def main() -> int:
         # Historial de estados solo para "Detalle_Con_Historial":
         #   GRIS -> BLANCO (hace 2 dias), BLANCO -> S1 (hace 1 dia).
         plano_id_hist = detalle_ids["Detalle_Con_Historial"]
-        dos_dias = (datetime.now() - timedelta(days=2)).isoformat(timespec="seconds")
-        un_dia = (datetime.now() - timedelta(days=1)).isoformat(timespec="seconds")
+        dos_dias = (datetime.now() - timedelta(days=2)).strftime("%Y-%m-%d %H:%M:%S")
+        un_dia = (datetime.now() - timedelta(days=1)).strftime("%Y-%m-%d %H:%M:%S")
         conn.execute(
             """
             INSERT INTO plano_estado_historial
@@ -179,9 +179,9 @@ def main() -> int:
         # Detalle_Multi_Archivo: 3 versiones para validar Treeview con
         # mas de un archivo (el dashboard muestra el mas reciente).
         plano_id_multi = detalle_ids["Detalle_Multi_Archivo"]
-        tres_dias = (datetime.now() - timedelta(days=3)).isoformat(timespec="seconds")
-        dia_y_medio = (datetime.now() - timedelta(hours=36)).isoformat(timespec="seconds")
-        hace_un_rato = (datetime.now() - timedelta(hours=2)).isoformat(timespec="seconds")
+        tres_dias = (datetime.now() - timedelta(days=3)).strftime("%Y-%m-%d %H:%M:%S")
+        dia_y_medio = (datetime.now() - timedelta(hours=36)).strftime("%Y-%m-%d %H:%M:%S")
+        hace_un_rato = (datetime.now() - timedelta(hours=2)).strftime("%Y-%m-%d %H:%M:%S")
         conn.execute(
             """
             INSERT INTO archivos
@@ -205,6 +205,26 @@ def main() -> int:
             VALUES (?, '2.0', 'GH', ?, 'Aprobacion tecnica', 'Cambio de fase', ?)
             """,
             (plano_id_multi, hace_un_rato, "Detalle_Multi_Archivo_v2.0_S2.pdf"),
+        )
+
+        # Sincronizar los campos denormalizados de `planos` con la
+        # version mas reciente de archivos. En produccion lo hace
+        # automaticamente upload_service.subir_nueva_version cuando la
+        # subida es superior; aqui lo hacemos a mano porque el seed
+        # inyecta directamente en archivos sin pasar por el servicio.
+        conn.execute(
+            "UPDATE planos SET version = ?, autor = ?, fecha = ?, tipo_archivo = 'pdf' "
+            "WHERE id = ?",
+            ("1.1", "AB", un_dia, plano_id_hist),
+        )
+        conn.execute(
+            "UPDATE planos SET version = ?, autor = ?, tipo_archivo = 'pdf' WHERE id = ?",
+            ("1.0", "CD", detalle_ids["Detalle_Solo_Archivos"]),
+        )
+        conn.execute(
+            "UPDATE planos SET version = ?, autor = ?, fecha = ?, tipo_archivo = 'pdf' "
+            "WHERE id = ?",
+            ("2.0", "GH", hace_un_rato, plano_id_multi),
         )
 
     print(f"[4/4] OK. Proyecto creado en: {folder}")

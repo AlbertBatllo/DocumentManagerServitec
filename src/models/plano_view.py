@@ -166,16 +166,21 @@ class PlanoView(BaseModel):
 
                 # Snapshot del archivo mas reciente (primera fila por el
                 # ORDER BY fecha DESC).
+                # Para `current_version` y `autor` priorizamos los
+                # campos denormalizados de `planos`, que reflejan la
+                # "version oficial" del plano (solo actualizada en
+                # subidas superiores via upload_service). El archivo
+                # mas reciente puede ser una version inferior (caso
+                # NARANJA), en cuyo caso planos.version sigue siendo
+                # la version superior anterior, que es lo que el
+                # usuario espera ver en la columna "Versión".
                 if archivos_rows:
                     latest = archivos_rows[0]
-                    current_version = latest["version"] or ""
-                    autor = latest["autor"] or (prow["autor"] or "")
+                    current_version = (prow["version"] or "") or (latest["version"] or "")
+                    autor = (prow["autor"] or "") or (latest["autor"] or "")
                     creation_date = str(latest["fecha"]) if latest["fecha"] else ""
                     latest_notes = latest["comentarios"] or ""
                 else:
-                    # Sin archivos: caer a los campos denormalizados de
-                    # planos (poblados por servicios de subida cuando
-                    # los reescribamos en Fase 6/7).
                     current_version = prow["version"] or ""
                     autor = prow["autor"] or ""
                     creation_date = ""

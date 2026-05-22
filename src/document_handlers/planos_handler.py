@@ -145,10 +145,11 @@ class PlanosHandler(BaseDocumentHandler):
     def submit_new_version(self, doc_id: str, name: str, version: str, state: str,
                            file_paths: list, author: str, notes: str, dwg_name: str = "",
                            entry_timestamp: str = None):
-        """Submit a new version of a plano document.
+        """Submit a new version of a plano document (legacy path).
 
-        Args:
-            entry_timestamp: Optional ISO timestamp to assign to the new entry.
+        Mantenido por compatibilidad con NewVersionForm legacy. El flujo
+        de Fase 6 entra por show_new_version_form -> UploadFormView ->
+        upload_service.subir_nueva_version y NO pasa por aqui.
         """
         if not self.controller:
             raise Exception("Planos controller not initialized")
@@ -158,6 +159,114 @@ class PlanosHandler(BaseDocumentHandler):
         path_objects = [Path(fp) if isinstance(fp, str) else fp for fp in file_paths]
         return self.controller.add_new_version(doc_id, version, state, path_objects, author, "", "", notes,
                                                dwg_name=dwg_name, entry_timestamp=entry_timestamp)
+
+    # === Fase 6: nuevo flujo de subida individual ===================
+
+    def show_new_version_form(self, back_to_dashboard: bool = False, pre_selected=None):
+        """
+        Sobreescribe el flujo del boton 'Registrar Nueva Version' para
+        usar el nuevo UploadFormView y upload_service (Fase 6) en lugar
+        del NewVersionForm legacy.
+
+        Solo cubre el CASO 2 (plano existente). Para crear un plano
+        nuevo, el usuario debe pasar por "Editar proyecto" (Fase 3) y
+        luego subir la primera version aqui.
+
+        Args:
+            back_to_dashboard: ignorado (siempre vuelve al dashboard).
+            pre_selected: dict con `id` del plano seleccionado en el
+                tree (formato actual del dashboard), o `None`.
+        """
+        from pathlib import Path
+        from tkinter import messagebox
+
+        if pre_selected is None:
+            messagebox.showinfo(
+                "Selecciona un plano",
+                "Para subir una nueva version, selecciona primero el plano "
+                "en la tabla.\n\n"
+                "Si quieres anadir un plano nuevo, usa 'Editar proyecto' "
+                "para crearlo y despues sube su primera version desde aqui."
+            )
+            return
+
+        # `pre_selected` viene del dashboard como dict {'id': nombre, ...}.
+        # En el modelo nuevo, ese 'id' es planos.codigo.
+        codigo = pre_selected.get('id') if isinstance(pre_selected, dict) else str(pre_selected)
+        if not codigo:
+            messagebox.showerror("Error", "No se ha podido identificar el plano seleccionado.")
+            return
+
+        project_path = getattr(self.app, 'current_project_path', None)
+        if not project_path:
+            messagebox.showerror("Error", "No hay proyecto activo.")
+            return
+        project_path = Path(project_path)
+
+        # Leer estado y version actuales para mostrar en el form.
+        from utils.database.project_database_manager import ensure_project_database
+        db = ensure_project_database(project_path)
+        with db.connection() as conn:
+            row = conn.execute(
+                "SELECT id, codigo, nombre, estado, version FROM planos WHERE codigo = ?",
+                (codigo,)
+            ).fetchone()
+        if row is None:
+            messagebox.showerror(
+                "Plano no encontrado",
+                f"No existe un plano con codigo {codigo!r} en este proyecto."
+            )
+            return
+
+        plano_info = {
+            'id': row['id'],
+            'codigo': row['codigo'],
+            'nombre': row['nombre'],
+            'estado': row['estado'],
+            'version': row['version'],
+        }
+
+        from views.upload_form_view import UploadFormView
+        view = UploadFormView(self.app.root)
+
+        def on_submit(form_data: dict, archivo_path: Path):
+            from services.upload_service import subir_nueva_version, UploadError
+            try:
+                result = subir_nueva_version(
+                    project_path,
+                    plano_info['id'],
+                    form_data,
+                    archivo_path,
+                )
+            except UploadError as e:
+                messagebox.showerror("Error al subir", str(e))
+                return
+            except Exception as e:
+                messagebox.showerror("Error inesperado", f"{e}")
+                return
+
+            # Mensaje informativo del resultado.
+            if result['es_version_superior']:
+                msg = (
+                    f"Version subida correctamente.\n\n"
+                    f"Estado tras la subida: {result['estado_nuevo']}\n"
+                    f"Archivo: {result['ruta_archivo']}"
+                )
+                messagebox.showinfo("Subida correcta", msg)
+            else:
+                msg = (
+                    f"La version introducida NO es superior a la actual.\n"
+                    f"El plano queda marcado como 'NARANJA' (version incoherente).\n\n"
+                    f"Archivo registrado en: {result['ruta_archivo']}"
+                )
+                messagebox.showwarning("Version incoherente", msg)
+
+            self.show_dashboard()
+
+        def on_cancel():
+            self.show_dashboard()
+
+        view.show_new_version(plano_info, on_submit, on_cancel)
 
     def _annotate_document_by_id(self, doc_id: str):
         """Launch PDF annotation for a plano document."""
