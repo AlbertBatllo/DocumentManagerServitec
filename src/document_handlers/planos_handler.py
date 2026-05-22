@@ -268,6 +268,53 @@ class PlanosHandler(BaseDocumentHandler):
 
         view.show_new_version(plano_info, on_submit, on_cancel)
 
+    # === Fase 7: subida masiva ======================================
+
+    def _show_bulk_upload(self, file_paths: list) -> None:
+        """
+        Obre la pantalla intermedia de Fase 7 amb una fila editable per
+        cada arxiu seleccionat. Al confirmar, crida
+        upload_service.subir_masivo i mostra el modal de resumen.
+
+        Args:
+            file_paths: list de Path / str amb els arxius seleccionats
+                pel filedialog del dashboard.
+        """
+        from pathlib import Path
+        from tkinter import messagebox
+
+        paths = [Path(p) if not isinstance(p, Path) else p for p in (file_paths or [])]
+        if not paths:
+            return
+
+        project_path = getattr(self.app, 'current_project_path', None)
+        if not project_path:
+            messagebox.showerror("Error", "No hay proyecto activo.")
+            return
+        project_path = Path(project_path)
+
+        # Precarregar codis existents (1 sola query, deteccio O(1) per fila).
+        from utils.database.project_database_manager import ensure_project_database
+        db = ensure_project_database(project_path)
+        with db.connection() as conn:
+            existing_codigos = {
+                row["codigo"]
+                for row in conn.execute("SELECT codigo FROM planos")
+            }
+
+        from views.bulk_upload_form_view import BulkUploadFormView
+        view = BulkUploadFormView(self.app.root)
+
+        def on_submit(items: list):
+            from services.upload_service import subir_masivo
+            results = subir_masivo(project_path, items)
+            view.show_summary(results, on_close=self.show_dashboard)
+
+        def on_cancel():
+            self.show_dashboard()
+
+        view.show(paths, existing_codigos, on_submit, on_cancel)
+
     def _annotate_document_by_id(self, doc_id: str):
         """Launch PDF annotation for a plano document."""
         document = self.get_document_by_id(doc_id)
@@ -372,6 +419,10 @@ class PlanosHandler(BaseDocumentHandler):
 
         # Refresh callback specific to planos
         callbacks['refresh_planos'] = self.refresh_data
+
+        # Fase 7: subida masiva. El dashboard fa askopenfilenames i ens
+        # delega la creacio de la pantalla intermedia + processament.
+        callbacks['bulk_upload'] = self._show_bulk_upload
 
         # History, annotation, and export callbacks
         callbacks['view_history'] = self.show_history_window

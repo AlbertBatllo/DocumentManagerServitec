@@ -1963,7 +1963,7 @@ class PlanosDashboard(ResponsiveBaseView):
     # ── Batch upload ─────────────────────────────────────────────────────
 
     def _batch_upload(self, callbacks: dict) -> None:
-        """Upload multiple files and auto-match them to planos."""
+        """Upload multiple files using the new bulk upload flow (Fase 7)."""
         file_paths = filedialog.askopenfilenames(
             title="Seleccionar archivos para subida masiva",
             filetypes=[
@@ -1977,6 +1977,19 @@ class PlanosDashboard(ResponsiveBaseView):
             return
 
         paths = [Path(p) for p in file_paths]
+
+        # Fase 7: delegamos al handler que abre BulkUploadFormView. Las
+        # funciones legacy _match_files_to_planos / _show_batch_preview /
+        # _process_batch_uploads quedan sin usar pero se conservan en el
+        # archivo por si una iteracion futura quiere reutilizar el fuzzy
+        # matching como sugerencia inicial del campo Codigo.
+        bulk_cb = callbacks.get('bulk_upload')
+        if bulk_cb:
+            bulk_cb(paths)
+            return
+
+        # Fallback: si por algun motivo el callback no esta registrado,
+        # caer al flujo legacy para no romper el boton.
         assignments = self._match_files_to_planos(paths)
         confirmed = self._show_batch_preview(assignments)
         if confirmed:

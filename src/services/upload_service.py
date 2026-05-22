@@ -387,3 +387,137 @@ def subir_nueva_version(
         "plano_id": plano_id,
         "ruta_archivo": ruta_rel,
     }
+
+
+def subir_masivo(
+    project_path: Path,
+    items: list,
+) -> list:
+    """
+    Procesa N items en bulk (Fase 7). Cada item es una transaccion
+    independiente: si una falla, las demas continuan.
+
+    Para cada item, decide entre plano nuevo (codigo no existe) y
+    nueva version (codigo existe) consultando la tabla `planos`.
+
+    Args:
+        project_path: ruta de la carpeta del proyecto.
+        items: list de dicts. Cada dict debe contener:
+            - 'archivo_path': Path absoluta al archivo origen.
+            - 'form_data': dict con `codigo`, `version`, `autor` y,
+              segun el caso:
+                * plano nuevo: `nombre` (opcional, default = codigo)
+                  y `comentarios` (opcional).
+                * version: `motivo_subida` (opcional).
+
+    Returns:
+        list de dicts en el mismo orden que items, con:
+            - 'archivo': basename del archivo origen.
+            - 'codigo': codigo del item (echo).
+            - 'resultat': 'ok' | 'naranja' | 'error'.
+            - 'detalls': mensaje informativo o de error.
+            - 'plano_id': id del plano afectado (si exit), else None.
+
+    No lanza excepciones: todas se capturan por item.
+    """
+    if not items:
+        return []
+
+    project_path = Path(project_path)
+    db_manager = ensure_project_database(project_path)
+
+    # Cache de codigos existentes al inicio. Despues de cada subida
+    # exitosa de plano nuevo, anadimos su codigo aqui para que items
+    # posteriores con el mismo codigo se interpreten como nueva version
+    # (comportamiento determinista, no condicionado al timing del SELECT).
+    with db_manager.connection() as conn:
+        existing_codigos = {
+            row["codigo"]
+            for row in conn.execute("SELECT codigo FROM planos")
+        }
+
+    results: list = []
+    for item in items:
+        archivo_path = Path(item.get("archivo_path", ""))
+        form_data = dict(item.get("form_data") or {})
+        codigo = (form_data.get("codigo") or "").strip()
+        basename = archivo_path.name if archivo_path.name else str(archivo_path)
+
+        if not codigo:
+            results.append({
+                "archivo": basename,
+                "codigo": codigo,
+                "resultat": "error",
+                "detalls": "Codigo vacio.",
+                "plano_id": None,
+            })
+            continue
+
+        try:
+            if codigo not in existing_codigos:
+                # Plano nuevo.
+                plano_id = subir_plano_nuevo(project_path, form_data, archivo_path)
+                existing_codigos.add(codigo)
+                results.append({
+                    "archivo": basename,
+                    "codigo": codigo,
+                    "resultat": "ok",
+                    "detalls": f"Plano nuevo creado (estado S1).",
+                    "plano_id": plano_id,
+                })
+            else:
+                # Nueva version sobre plano existente.
+                with db_manager.connection() as conn:
+                    row = conn.execute(
+                        "SELECT id FROM planos WHERE codigo = ?", (codigo,)
+                    ).fetchone()
+                if row is None:
+                    # Coherencia rota entre el cache i la BD. Defensivo.
+                    raise UploadError(
+                        f"Plano con codigo {codigo!r} no encontrado en BD."
+                    )
+                plano_id = row["id"] if hasattr(row, "keys") else row[0]
+                res = subir_nueva_version(
+                    project_path, plano_id, form_data, archivo_path
+                )
+                if res["es_version_superior"]:
+                    results.append({
+                        "archivo": basename,
+                        "codigo": codigo,
+                        "resultat": "ok",
+                        "detalls": (
+                            f"Nueva version superior. "
+                            f"Estado: {res['estado_nuevo']}."
+                        ),
+                        "plano_id": plano_id,
+                    })
+                else:
+                    results.append({
+                        "archivo": basename,
+                        "codigo": codigo,
+                        "resultat": "naranja",
+                        "detalls": (
+                            "Version NO superior. Plano marcado como "
+                            "NARANJA (version incoherente)."
+                        ),
+                        "plano_id": plano_id,
+                    })
+
+        except UploadError as e:
+            results.append({
+                "archivo": basename,
+                "codigo": codigo,
+                "resultat": "error",
+                "detalls": str(e),
+                "plano_id": None,
+            })
+        except Exception as e:
+            results.append({
+                "archivo": basename,
+                "codigo": codigo,
+                "resultat": "error",
+                "detalls": f"Error inesperado: {e}",
+                "plano_id": None,
+            })
+
+    return results
